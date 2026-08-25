@@ -19,7 +19,8 @@ def main() -> None:
     parser.add_argument("--max-sessions", type=int, help="limit downloads for a smoke run")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
-    raw_csv = args.raw_csv or args.output_dir / "fastf1_telemetry.csv"
+    raw_csv = args.raw_csv or args.output_dir / "fastf1_telemetry.csv" 
+    #if there is no raw_csv created before we create a new one at path on right(adding the data to csv is done below)
     if not args.raw_csv:
         count = extract_2024_races(raw_csv, args.cache_dir, year=args.year, sample_rate_hz=args.sample_rate_hz,
                                    max_sessions=args.max_sessions)
