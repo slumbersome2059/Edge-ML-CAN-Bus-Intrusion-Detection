@@ -1,58 +1,70 @@
-# Synthetic CAN Telemetry Simulator
+# FastF1 CAN anomaly dataset tools
 
-This dependency-free test-data source produces plausible, correlated driving
-telemetry and optional forged CAN-style frames. It is intentionally synthetic:
-the arbitration IDs and payload encoding are stable test conventions, **not** a
-vehicle-specific DBC or hardware interface.
+This repository builds a reproducible Formula 1 telemetry dataset for a
+next-timestep LSTM autoencoder and replays the resulting raw telemetry as
+synthetic SocketCAN traffic. It uses FastF1 2024 Grand Prix race car data for
+all available drivers and keeps only `RPM`, `Speed`, `Throttle`, and `nGear`.
+The CAN layout is deliberately synthetic, not a vehicle-specific DBC.
 
-## Quick start
+## Build the dataset
 
-```bash
-python3 run_simulation.py --output-dir simulation_output
-```
-
-The defaults generate 300 seconds at 10 Hz with deterministic seed `42`.
-Adjust `--duration`, `--sample-rate`, `--seed`, and `--injection-rate` as
-needed. For example, a short test run with frequent attacks is:
+Install the dataset and replay dependencies, then download/process the full
+2024 season. FastF1's cache makes repeat runs reuse session downloads.
 
 ```bash
-python3 run_simulation.py --output-dir demo --duration 30 --injection-rate 0.02
+python3 -m pip install -r requirements.txt
+python3 build_fastf1_dataset.py --output-dir data/fastf1_2024
 ```
 
-The roles can also be run independently:
+For an extraction smoke test, use `--max-sessions 2`; it will not contain
+enough group-diverse telemetry to guarantee the final 10,000 examples.
+
+The completed output directory contains raw, unscaled data:
+
+- `fastf1_telemetry.csv`: 10 Hz source records with race/driver provenance.
+- `train_windows.npz`: 9,000 normal examples for the autoencoder.
+- `test_windows.npz`: 1,000 external examples: 500 clean and 500 faulted.
+- `test_clean_windows.npz`: the unmodified held-out comparison set.
+- `manifest.json`: feature order, split groups, counts, and seed.
+
+Every archive contains `features` and `history` shaped `[examples, 10, 4]`,
+next-step `targets` shaped `[examples, 4]`, and raw `replay` rows shaped
+`[examples, 11, 4]`. No scaling occurs here.
+
+## Autoencoder integration
+
+Clone and install the supplied
+[time-series-autoencoder](https://github.com/JulesBelveze/time-series-autoencoder)
+repository. Copy `model_integration/tsa/fastf1_dataset.py` into its `tsa/`
+directory, copy the config into `configs/`, and copy `run_f1_anomaly.py` to its
+repository root. Replace both `/replace/with/...` values in the config with
+absolute archive paths, then run:
 
 ```bash
-python3 normal_driving_simulator.py --output normal.jsonl
-python3 fault_injector.py --input normal.jsonl --injected-output injected.jsonl --truth-output truth.jsonl
-python3 aggregator.py --normal-input normal.jsonl --injected-input injected.jsonl --output stream.jsonl
+python3 run_f1_anomaly.py
 ```
 
-## Outputs
+The adapter performs the model repository's training-only standardization and
+its internal 80/20 normal train/validation split. The script derives a 99th
+percentile next-step MSE threshold from clean validation windows, then reports
+false positives for the 500 clean external windows and detection metrics for
+the 500 faulted windows.
 
-- `normal_frames.jsonl`: baseline traffic from Agent 1.
-- `injected_frames.jsonl`: only the forged traffic from Agent 2.
-- `stream.jsonl`: timestamp-ordered merged detector input from Agent 3.
-- `ground_truth.jsonl`: one labelled attack event per line, kept separate from telemetry.
-- `metadata.json`: resolved configuration, seeds, and frame/event counts.
+## CAN replay
 
-Each merged-stream telemetry line contains `timestamp_ms`, `arbitration_id`,
-`dlc`, `data_hex`, `signal`, and `value`. The intermediate normal/injected
-files additionally contain an internal `source` field. Payloads are four-byte,
-little-endian unsigned integers. Values use these fixed synthetic conventions:
+Create a `vcan0` interface on the Raspberry Pi, then replay a selected
+held-out sequence. Use dry run first to write the exact frames without sending.
 
-| Signal | CAN ID | Unit | Scale |
-| --- | --- | --- | --- |
-| `engine_rpm` | `0x0C0` | RPM | 0.25 RPM/bit |
-| `vehicle_speed_kph` | `0x0D0` | km/h | 0.01 km/h/bit |
-| `steering_angle_deg` | `0x0E0` | degrees | 0.1 degree/bit (offset +540) |
-| `brake_pedal_pct` | `0x0F0` | percent | 0.1 percent/bit |
+```bash
+python3 -m f1_can.replay --archive data/fastf1_2024/test_windows.npz --sequence-index 0 --dry-run --output frames.jsonl
+python3 -m f1_can.replay --archive data/fastf1_2024/test_windows.npz --sequence-index 0 --channel vcan0 --rate-hz 10
+```
 
-Injected attacks are either 80--100% brake commands while normal speed exceeds
-40 km/h, or RPM values 1.8--2.5 times normal (capped at 8,000 RPM). They arrive
-in bursts of two to four frames.
+Frames use standard ID `0x100`: RPM `uint16`, speed `uint16` at 0.01 km/h,
+throttle `uint8`, gear `uint8`, counter `uint8`, and one zero reserved byte.
 
 ## Tests
 
 ```bash
-python3 -m unittest -v
+python3 -m unittest discover -v
 ```

@@ -1,0 +1,32 @@
+"""Extract 2024 FastF1 race telemetry and build model-ready raw archives."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from f1_can.dataset import build_archives
+from f1_can.telemetry import extract_2024_races
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output-dir", type=Path, default=Path("data/fastf1_2024"))
+    parser.add_argument("--raw-csv", type=Path, help="reuse a previously extracted telemetry CSV")
+    parser.add_argument("--cache-dir", type=Path, default=Path(".cache/fastf1"))
+    parser.add_argument("--year", type=int, default=2024)
+    parser.add_argument("--sample-rate-hz", type=int, default=10)
+    parser.add_argument("--max-sessions", type=int, help="limit downloads for a smoke run")
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+    raw_csv = args.raw_csv or args.output_dir / "fastf1_telemetry.csv"
+    if not args.raw_csv:
+        count = extract_2024_races(raw_csv, args.cache_dir, year=args.year, sample_rate_hz=args.sample_rate_hz,
+                                   max_sessions=args.max_sessions)
+        print(f"Extracted {count} raw telemetry rows to {raw_csv}")
+    result = build_archives(raw_csv, args.output_dir, seed=args.seed)
+    print(f"Wrote {result['train']} normal, {result['test']} test, and {result['faulted']} faulted examples to {args.output_dir}")
+
+
+if __name__ == "__main__":
+    main()
