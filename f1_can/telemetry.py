@@ -7,27 +7,39 @@ from pathlib import Path
 from . import FEATURE_COLUMNS
 
 
-def _resample_car_data(car_data, *, sample_rate_hz: int):
+def _resample_car_data(car_data):
     """Return valid car data resampled without combining separate drivers."""
-    import pandas as pd
+    
 
-    required = ["Date", "SessionTime", *FEATURE_COLUMNS]
+    required = set(["Date", *FEATURE_COLUMNS]).difference(["DeltaTime"])#feature columns is a tuple of the info we need for autoencoder(rpm, throttle, ...)
     missing = set(required).difference(car_data.columns)
     if missing:
         raise ValueError(f"FastF1 car data is missing columns: {sorted(missing)}")
-    frame = car_data.loc[:, required].copy().dropna(subset=["Date", *FEATURE_COLUMNS])
-    frame = frame[(frame["Throttle"] <= 100) & (frame["Throttle"] >= 0) & (frame["nGear"] >= 0)]
-    frame = frame.drop_duplicates(subset="Date").sort_values("Date").set_index("Date")
-    if frame.empty:
-        return frame.reset_index()
-    cadence = pd.Timedelta(seconds=1 / sample_rate_hz)
-    signals = frame.loc[:, list(FEATURE_COLUMNS)].resample(cadence).asfreq()
-    signals[["RPM", "Speed", "Throttle"]] = signals[["RPM", "Speed", "Throttle"]].interpolate(
-        method="time", limit_direction="both"
-    )
-    signals["nGear"] = signals["nGear"].ffill().bfill()
-    session_time = frame["SessionTime"].resample(cadence).asfreq().interpolate(method="time", limit_direction="both")
-    return signals.assign(SessionTime=session_time).dropna().reset_index()
+    frame = car_data.loc[:, list(required)].copy().dropna(subset=list(required))
+    #.loc[:, required] accesses all the rows keeping the data for the required(list defined above) columns
+    """
+    - .copy.dropna(...), makes a copy of the data frame so that orig doesn't get affected
+    - dropna removes rows by default if no indication is given of what to remove, and
+    it removes them if any cell in that row contains a missing value(things like np.na)
+    - Here we only consider if it has missing values in the columns given by subset but if not all columns considered
+    """
+    frame = frame[(frame["Throttle"] <= 100) & (frame["Throttle"] >= 0) & (frame["nGear"] >= 0)]#throttle is a percentage
+    """
+    - The (frame["Throttle"] <= 100) generates a boolean vector and the &s work column wise 
+    and at the end frame contains all the rows which have a 1 in them in the 
+    boolean vector 
+    """
+    frame = frame.drop_duplicates(subset="Date").sort_values("Date")
+    #The index is the unique identifier of the row, so here you make the Date(a name of a column) the index
+    #It's much faster to find values in the indexed column compared to a normal column
+    #If no index set there will be a unique number given to each index
+    if frame.empty:#axes of length 0
+        return frame
+    frame["DeltaTime"] = frame["Date"].diff()
+    frame = frame.iloc[1:]#This is to just deal with the NaN that is produced from the diff
+    #I can't think of any good default value to give it so I thought I would clip the whole row
+    
+    return frame.loc[:, [*FEATURE_COLUMNS]]
 
 
 def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024, sample_rate_hz: int = 10,
@@ -46,10 +58,10 @@ def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024, sampl
         raise ValueError("sample_rate_hz must be positive")
     cache_dir.mkdir(parents=True, exist_ok=True)
     #I don't think caching is really necessary because we create the data only once
-    #we should never be making repeated calls
+    #we should never be making repeated calls as our detector trains on the data created
     fastf1.Cache.enable_cache(str(cache_dir))
     schedule = fastf1.get_event_schedule(year, include_testing=False)#include_testing is testing sessions of races
-    #EventSchedule object, you can access info about different events from here
+    #EventSchedule object and it is a datafram, you can access info about different events from here
     rows = []
     completed = 0#number of completed sessions
     for _, event in schedule.iterrows():
@@ -73,7 +85,7 @@ def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024, sampl
         for driver in session.drivers:
             try:
                 laps = session.laps.pick_drivers(driver)
-                segment = _resample_car_data(laps.get_car_data(), sample_rate_hz=sample_rate_hz)
+                segment = _resample_car_data(laps.get_car_data())
             except Exception as exc:
                 print(f"Skipping {event['EventName']} driver {driver}: {exc}")
                 continue
