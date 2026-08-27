@@ -6,7 +6,6 @@ from pathlib import Path
 
 from . import FEATURE_COLUMNS
 
-
 def _resample_car_data(car_data):
     """Return valid car data resampled without combining separate drivers."""
     
@@ -35,14 +34,14 @@ def _resample_car_data(car_data):
     #If no index set there will be a unique number given to each index
     if frame.empty:#axes of length 0
         return frame
-    frame["DeltaTime"] = frame["Date"].diff()
+    frame["DeltaTime"] = (frame["Date"].diff()).dt.total_seconds()
     frame = frame.iloc[1:]#This is to just deal with the NaN that is produced from the diff
     #I can't think of any good default value to give it so I thought I would clip the whole row
     
     return frame.loc[:, [*FEATURE_COLUMNS]]
 
 
-def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024, sample_rate_hz: int = 10,
+def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024,
                        max_sessions: int | None = None) -> int:
     """Download completed race telemetry for every listed driver and write CSV.
 
@@ -54,8 +53,6 @@ def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024, sampl
         import pandas as pd
     except ImportError as exc:  # pragma: no cover - environment dependency
         raise RuntimeError("install requirements.txt before extracting FastF1 telemetry") from exc
-    if sample_rate_hz <= 0:
-        raise ValueError("sample_rate_hz must be positive")
     cache_dir.mkdir(parents=True, exist_ok=True)
     #I don't think caching is really necessary because we create the data only once
     #we should never be making repeated calls as our detector trains on the data created
@@ -64,6 +61,7 @@ def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024, sampl
     #EventSchedule object and it is a datafram, you can access info about different events from here
     rows = []
     completed = 0#number of completed sessions
+    finish = False
     for _, event in schedule.iterrows():
         try:
             round_number = int(event["RoundNumber"])
@@ -71,6 +69,8 @@ def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024, sampl
             continue
         if round_number <= 0:
             continue
+        else:
+            finish = True
         if max_sessions is not None and completed >= max_sessions:
             break
         try:
@@ -98,6 +98,8 @@ def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024, sampl
             segment["event"] = event["EventName"]
             segment["driver"] = str(driver)
             rows.append(segment)
+        if finish:
+            break
     if not rows:
         raise RuntimeError("no valid FastF1 telemetry was extracted")
     output.parent.mkdir(parents=True, exist_ok=True)

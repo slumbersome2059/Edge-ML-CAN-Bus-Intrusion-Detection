@@ -7,6 +7,7 @@ from pathlib import Path
 
 from f1_can.dataset import build_archives
 from f1_can.telemetry import extract_2024_races
+from f1_can.prepareData import test_prepare_datasets
 
 
 def main() -> None:
@@ -15,19 +16,17 @@ def main() -> None:
     parser.add_argument("--raw-csv", type=Path, help="reuse a previously extracted telemetry CSV")
     parser.add_argument("--cache-dir", type=Path, default=Path(".cache/fastf1"))
     parser.add_argument("--year", type=int, default=2024)
-    parser.add_argument("--sample-rate-hz", type=int, default=10)
-    parser.add_argument("--max-sessions", type=int, help="limit downloads for a smoke run")
+    parser.add_argument("--max-sessions", type=int, help="limit downloads for a smoke run", default=42)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     raw_csv = args.raw_csv or args.output_dir / "fastf1_telemetry.csv" 
     #if there is no raw_csv created before we create a new one at path on right(adding the data to csv is done below)
     if not args.raw_csv:
-        count = extract_2024_races(raw_csv, args.cache_dir, year=args.year, sample_rate_hz=args.sample_rate_hz,
+        count = extract_2024_races(raw_csv, args.cache_dir, year=args.year,
                                    max_sessions=args.max_sessions)
         print(f"Extracted {count} raw telemetry rows to {raw_csv}")
-    result = build_archives(raw_csv, args.output_dir, seed=args.seed)
-    print(f"Wrote {result['train']} normal, {result['test']} test, and {result['faulted']} faulted examples to {args.output_dir}")
-
-
+    #result = build_archives(raw_csv, args.output_dir, seed=args.seed)
+    #print(f"Wrote {result['train']} normal, {result['test']} test, and {result['faulted']} faulted examples to {args.output_dir}")
+    
 if __name__ == "__main__":
-    main()
+    test_prepare_datasets()
