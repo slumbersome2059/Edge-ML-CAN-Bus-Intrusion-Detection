@@ -96,12 +96,4 @@ def prepare_datasets(csv_path: str):
     """
     # the shuffle is saying reshuffle at the end of every epoch
 
-    return train_loader, val_loader, test_loader, scaler, X_val_t, X_test_t, X_train_t
-def test_prepare_datasets():
-    csv_path = "data/fastf1_2024/fastf1_telemetry.csv"
-    train_loader, val_loader, test_loader, scaler, X_val_t, X_test_t, X_train_t = prepare_datasets(csv_path)
-    print(len(X_train_t))#veryifying that train and test data is of correct length
-    print(len(X_test_t))
-    b1 = next(iter(train_loader))[0]
-    assert len(b1) == BATCH_SIZE
-    
+    return train_loader, val_loader, test_loader, scaler, X_val_t, X_test_t

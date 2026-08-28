@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from f1_can.dataset import build_archives
 from f1_can.telemetry import extract_2024_races
-from f1_can.prepareData import test_prepare_datasets
+from f1_can.prepareData import *
+
+from model_integration.Autoencoder import *
+
 
 
 def main() -> None:
@@ -25,8 +27,31 @@ def main() -> None:
         count = extract_2024_races(raw_csv, args.cache_dir, year=args.year,
                                    max_sessions=args.max_sessions)
         print(f"Extracted {count} raw telemetry rows to {raw_csv}")
+    
+    train_loader, val_loader, test_loader, scaler, X_val_t, X_test_t = (
+            prepare_datasets(raw_csv)
+        )
+
+    # 2. Instantiate Model
+    model = ConvAutoencoder1D(in_channels=len(FEATURE_COLUMNS))
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Autoencoder Model Initialized (Total Parameters: {total_params})")
+
+    # 3. Train Model
+    print("\nStarting Autoencoder Training...")
+    train_autoencoder(
+        model, train_loader, val_loader, epochs=20
+    )
+
+    # 4. Compute Anomaly Threshold
+    threshold_3sigma, threshold_p99 = calculate_anomaly_threshold(
+        model, X_val_t
+    )
+
+    # Save trained weights for Phase 4 & Phase 5
+    torch.save(model.state_dict(), "autoencoder_ids.pth")
     #result = build_archives(raw_csv, args.output_dir, seed=args.seed)
     #print(f"Wrote {result['train']} normal, {result['test']} test, and {result['faulted']} faulted examples to {args.output_dir}")
     
 if __name__ == "__main__":
-    test_prepare_datasets()
+    main()
