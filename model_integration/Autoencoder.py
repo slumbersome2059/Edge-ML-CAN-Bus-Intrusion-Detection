@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import copy
 
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.manual_seed(42)
 np.random.seed(42)
