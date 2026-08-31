@@ -39,12 +39,12 @@ def _resample_car_data(car_data):
         
     return frame.drop(columns=["Date"], errors="ignore")
 
-def keepSensorDataColumns(car_data):
+def keepRequiredColumns(car_data):
     required = ["Date"] + Sensors.SENSOR_NAME_COLUMNS#feature columns is a tuple of the info we need for autoencoder(rpm, throttle, ...)
     missing = set(required).difference(car_data.columns)
     if missing:
         raise ValueError(f"FastF1 car data is missing columns: {sorted(missing)}")
-    return car_data.loc[list(Sensors.SENSOR_NAME_COLUMNS)]
+    return car_data[required]
 
 def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024,
                        max_sessions: int | None = None) -> int:
@@ -90,7 +90,7 @@ def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024,
         for driver in session.drivers:
             try:
                 laps = session.laps.pick_drivers(driver)
-                segment = _resample_car_data(keepSensorDataColumns(laps.get_car_data()))#ONLY DATA BY SENSOR_NAME_COLUMNS is given
+                segment = _resample_car_data(keepRequiredColumns(laps.get_car_data()))#ONLY DATA BY SENSOR_NAME_COLUMNS is given
             except Exception as exc:
                 print(f"Skipping {event['EventName']} driver {driver}: {exc}")
                 continue

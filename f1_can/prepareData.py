@@ -40,7 +40,6 @@ def prepare_datasets(csv_path: str):
     test_df = df[df["segment_id"].isin(test_segs)].copy()
     # 2. Feature Scaling (Fit ONLY on training data to prevent leakage)
     scaler = StandardScaler()
-    print(train_df)
     FEATURE_COLUMNS = tuple(set(df.columns).difference(["segment_id"]))
     scaler.fit(train_df[[*FEATURE_COLUMNS]])#this calcualates mean and SD, later used in transform to scale things
     #The scaling/transformation does is z = x - \mu/\sigma, the z score stuff
