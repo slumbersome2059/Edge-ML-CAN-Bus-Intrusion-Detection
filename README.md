@@ -1,4 +1,4 @@
-# Edge ML CAN-Bus Intrusion Detection
+# Edge ML Anomaly Detection System
 
 This is an edge-oriented anomaly-detection prototype. It downloads 2024 race telemetry with FastF1, prepares race-driver-aware time-series windows, trains a compact PyTorch convolutional autoencoder on normal behaviour, and flags injected sensor anomalies from reconstruction error.
 
