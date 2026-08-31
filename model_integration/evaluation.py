@@ -21,13 +21,13 @@ def evaluate_anomaly_detector(
     mse_errors = compute_reconstruction_errors(model, test_tensor)
 
     # Binary prediction based on threshold
-    y_pred = (mse_errors > threshold).astype(int)
+    y_pred = (mse_errors > threshold).astype(int)#generates a vector
 
     # Calculate overall metrics
     precision, recall, f1, _ = precision_recall_fscore_support(y_true, y_pred, average="binary")
     cm = confusion_matrix(y_true, y_pred)
-    tn, fp, fn, tp = cm.ravel()
-    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    tn, fp, fn, tp = cm.ravel()#This line and the line above is how its done on g2g
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0#formula checked from wikipedia
 
     print("==================================================")
     print("      PHASE 4: ANOMALY DETECTION EVALUATION       ")
@@ -42,12 +42,15 @@ def evaluate_anomaly_detector(
     print(f"FPR:       {fpr:.4%}\n")
 
     # Breakdown detection rate per fault type
+    """
+    Add later
     print("--- Recall Breakdown by Injection Type ---")
-    df_eval = pd.DataFrame({"fault": fault_tags, "true": y_true, "pred": y_pred})
-    for fault in ["rpm_spike", "speed_offset", "throttle_stuck", "gear"]:
-        sub = df_eval[df_eval["fault"] == fault]
-        if len(sub) > 0:
-            det_rate = (sub["pred"] == 1).mean()
-            print(f"{fault:<15}: {det_rate:.2%} detected ({sub['pred'].sum()}/{len(sub)})")
-
+        df_eval = pd.DataFrame({"fault": fault_tags, "true": y_true, "pred": y_pred})
+        for fault in ["rpm_spike", "speed_offset", "throttle_stuck", "gear"]:
+            sub = df_eval[df_eval["fault"] == fault]
+            if len(sub) > 0:
+                det_rate = (sub["pred"] == 1).mean()
+                print(f"{fault:<15}: {det_rate:.2%} detected ({sub['pred'].sum()}/{len(sub)})")
+    """
+    
     return mse_errors, y_pred

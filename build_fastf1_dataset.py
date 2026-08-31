@@ -28,7 +28,7 @@ def main() -> None:
                                    max_sessions=args.max_sessions)
         print(f"Extracted {count} raw telemetry rows to {raw_csv}")
     
-    train_loader, val_loader, scaler, X_val_t, X_test = (
+    train_loader, val_loader, scaler, X_val_t, X_test, X_train_t = (
             prepare_datasets(raw_csv)
         )
 

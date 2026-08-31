@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from .sensors import Sensors
 
-from . import FEATURE_COLUMNS
+
 
 def _resample_car_data(car_data):
     """Return valid car data resampled without combining separate drivers."""
-    
-
-    required = set(["Date", *FEATURE_COLUMNS]).difference(["DeltaTime"])#feature columns is a tuple of the info we need for autoencoder(rpm, throttle, ...)
-    missing = set(required).difference(car_data.columns)
-    if missing:
-        raise ValueError(f"FastF1 car data is missing columns: {sorted(missing)}")
-    frame = car_data.loc[:, list(required)].copy().dropna(subset=list(required))
+    frame = car_data.copy().dropna()
     #.loc[:, required] accesses all the rows keeping the data for the required(list defined above) columns
+    #loc[col], loc[row] can work for accessing a row or column, for multiple rows you shoud do loc[[r1, r2, ...]]
     """
     - .copy.dropna(...), makes a copy of the data frame so that orig doesn't get affected
     - dropna removes rows by default if no indication is given of what to remove, and
@@ -38,8 +34,17 @@ def _resample_car_data(car_data):
     frame = frame.iloc[1:]#This is to just deal with the NaN that is produced from the diff
     #I can't think of any good default value to give it so I thought I would clip the whole row
     
-    return frame.loc[:, [*FEATURE_COLUMNS]]
+    #fixing types
+    dTypeDict = {}
+        
+    return frame.drop(columns=["Date"], errors="ignore")
 
+def keepSensorDataColumns(car_data):
+    required = ["Date"] + Sensors.SENSOR_NAME_COLUMNS#feature columns is a tuple of the info we need for autoencoder(rpm, throttle, ...)
+    missing = set(required).difference(car_data.columns)
+    if missing:
+        raise ValueError(f"FastF1 car data is missing columns: {sorted(missing)}")
+    return car_data.loc[list(Sensors.SENSOR_NAME_COLUMNS)]
 
 def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024,
                        max_sessions: int | None = None) -> int:
@@ -85,7 +90,7 @@ def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024,
         for driver in session.drivers:
             try:
                 laps = session.laps.pick_drivers(driver)
-                segment = _resample_car_data(laps.get_car_data())
+                segment = _resample_car_data(keepSensorDataColumns(laps.get_car_data()))#ONLY DATA BY SENSOR_NAME_COLUMNS is given
             except Exception as exc:
                 print(f"Skipping {event['EventName']} driver {driver}: {exc}")
                 continue
@@ -93,10 +98,6 @@ def extract_2024_races(output: Path, cache_dir: Path, *, year: int = 2024,
                 continue
             segment_id = f"{year}-R{round_number:02d}-{driver}"
             segment["segment_id"] = segment_id
-            segment["year"] = year
-            segment["round"] = round_number
-            segment["event"] = event["EventName"]
-            segment["driver"] = str(driver)
             rows.append(segment)
         if finish:
             break

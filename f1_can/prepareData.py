@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from . import FEATURE_COLUMNS, SEQUENCE_LENGTH
+from .sensors import Sensors
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.manual_seed(42)
@@ -41,6 +41,7 @@ def prepare_datasets(csv_path: str):
     # 2. Feature Scaling (Fit ONLY on training data to prevent leakage)
     scaler = StandardScaler()
     print(train_df)
+    FEATURE_COLUMNS = tuple(set(df.columns).difference(["segment_id"]))
     scaler.fit(train_df[[*FEATURE_COLUMNS]])#this calcualates mean and SD, later used in transform to scale things
     #The scaling/transformation does is z = x - \mu/\sigma, the z score stuff
     #It is really important you fit on training data, fitting on the other data means 
@@ -94,30 +95,46 @@ def prepare_datasets(csv_path: str):
     """
     # the shuffle is saying reshuffle at the end of every epoch
 
-    return train_loader, val_loader, scaler, X_val_t, X_test
+    return train_loader, val_loader, scaler, X_val_t, X_test, X_train_t
 
-def inject_fault(raw_window: np.ndarray, fault_type: str, rng: np.random.Generator) -> np.ndarray:
-    """Injects CAN bus sensor faults into raw unscaled window (WINDOW_SIZE, n_features)."""
+def inject_fault(raw_window: pd.DataFrame, fault_type: str, rng: np.random.Generator) -> np.ndarray:
+    """Injects CAN bus sensor faults into raw unscaled window which has shape (WINDOW_SIZE, n_features)."""
+
     result = raw_window.copy()
     randSize = rng.choice([2,3,4,5])
     start = rng.integers(0, WINDOW_SIZE - randSize)  # Fault begins partway through window
 
-    #Initially the code didn't use strings for columns and used hardcoded index values so I changed this
-    if fault_type == "rpm_spike":
-        result[start:start + randSize, "RPM"] = np.clip(
-            result[start:start + randSize, "RPM"] * rng.uniform(1.45, 1.9), 0, 16000
-        )
-    elif fault_type == "speed_offset":
-        result[start:start + randSize, "Speed"] = np.clip(
-            result[start:start + randSize, "Speed"] + rng.choice((-1, 1)) * rng.uniform(55, 90), 0, 500
-        )
-    elif fault_type == "throttle_stuck":
-        result[start:start + randSize, "Throttle"] = rng.choice((0, 100))
-    else:  # gear manipulation
-        result[start:start + randSize, "nGear"] = np.clip(
-            result[start:start + randSize, "nGear"] + rng.choice((-3, -2, 2, 3)), 0, 8
-        )
+    # Retrieve the target rows' index to use with .loc
+    target_idx = result.index[start:start + randSize]#this extracts whatever the 
+    # index list is, so list that stores the stuff before , on loc 
+    # this list could be string labels
+    # if you want to use integers no matter the index use iloc, which is loc but works only with integers
 
+    if fault_type == Sensors.RPM.fault.value:
+        sensor = Sensors.RPM
+        result.loc[target_idx, sensor.name] = np.clip(
+            result.loc[target_idx, sensor.name] * rng.uniform(1.45, 1.9), 
+            0, 
+            sensor.max_val
+        )
+    elif fault_type == Sensors.SPEED.fault.value:
+        sensor = Sensors.SPEED
+        result.loc[target_idx, sensor.name] = np.clip(
+            result.loc[target_idx, sensor.name] + rng.choice((-1, 1)) * rng.uniform(55, 90), 
+            0, 
+            sensor.max_val
+        )
+    elif fault_type == Sensors.THROTTLE.fault.value:
+        sensor = Sensors.THROTTLE
+        result.loc[target_idx, sensor.name] = rng.choice((0, sensor.max_val))
+    else:  # gear manipulation
+        sensor = Sensors.GEAR
+        result.loc[target_idx, sensor.name] = np.clip(
+            result.loc[target_idx, sensor.name] + rng.choice((-3, -2, 2, 3)), 
+            0, 
+            sensor.max_val
+        )
+    
     return result
 
 
@@ -127,23 +144,24 @@ def generate_evaluation_dataset(
     """
     Generates balanced test windows with equal mix of clean data and 4 injected fault types.
     Normalizes data using the pre-fitted scaler.
+    raw_test_windows has format (num_test_windows, WINDOW_SIZE, n_features)
     """
     rng = np.random.default_rng(seed)
-    fault_types = ["rpm_spike", "speed_offset", "throttle_stuck", "gear"]
     
     processed_windows = []
     labels = []  # 0: Normal, 1: Anomaly
     fault_tags = []
 
     for window in raw_test_windows:
+        fault_str = ""
         is_anomaly = rng.random() < anomaly_ratio
-        
         if is_anomaly:
-            fault = rng.choice(fault_types)
+            fault = rng.choice(Sensors.FAULT_TYPES)
+            fault_str = fault.value
             modified_window = inject_fault(window, fault, rng)
             label = 1
         else:
-            fault = "clean"
+            fault_str = "clean"
             modified_window = window.copy()
             label = 0
 
@@ -151,7 +169,7 @@ def generate_evaluation_dataset(
         scaled_window = scaler.transform(modified_window)
         processed_windows.append(scaled_window)
         labels.append(label)
-        fault_tags.append(fault)
+        fault_tags.append(fault_str)
 
     X_test_scaled = np.array(processed_windows, dtype=np.float32)
     # Transpose to PyTorch Conv1D layout: (Batch, Channels/Features, Window_Size)
