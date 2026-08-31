@@ -8,7 +8,7 @@ from sklearn.preprocessing import StandardScaler
 
 # Import your functions and constants from the source modules
 import f1_can
-from f1_can.prepareData import prepare_datasets, inject_fault
+from f1_can.prepareData import prepare_datasets, inject_fault, WINDOW_SIZE, generate_evaluation_dataset
 from f1_can.telemetry import _resample_car_data, keepSensorDataColumns
 from f1_can.sensors import Sensors
 
@@ -21,11 +21,11 @@ from f1_can.sensors import Sensors
 @pytest.fixture
 def raw_car_data():
     """Generates synthetic FastF1 car telemetry DataFrame for testing."""
-    dates = pd.date_range("2024-01-01", periods=20, freq="100ms")
+    dates = pd.date_range("2024-01-01", periods=WINDOW_SIZE, freq="100ms")
     return pd.DataFrame({
         "Date": dates,
-        "RPM": [10000 + i * 100 for i in range(20)],
-        "Speed": [200 + i for i in range(20)],
+        "RPM": [10000 + i * 100 for i in range(WINDOW_SIZE)],
+        "Speed": [200 + i for i in range(WINDOW_SIZE)],
         "Throttle": [50.0, 60.0, 105.0, -5.0, 70.0, 80.0, 90.0, 100.0, 0.0, 50.0,
                      50.0, 60.0, 20.0, 5.0, 70.0, 80.0, 90.0, 100.0, 0.0, 50.0],  # Includes invalid values
         "nGear": [1, 2, 3, 1, 4, 5, 6, 7, 8, 8,
@@ -35,22 +35,21 @@ def raw_car_data():
 @pytest.fixture
 def sample_window():
     """Returns a single clean window of shape (20, 4)."""
-    window_size, n_features = 20, 4
     # Columns: RPM (2000), Speed (60), Throttle (20), Gear (3)
     
     #then on each dimension the array is repeated the same number of times
     return pd.DataFrame({
-        "RPM":[2000.0 for i in range(20)],
-        "Speed":[60.0 for i in range(20)],
-        "Throttle":[20.0 for i in range(20)],
-        "nGear":[3.0 for i in range(20)]
+        "RPM":[2000.0 for i in range(WINDOW_SIZE)],
+        "Speed":[60.0 for i in range(WINDOW_SIZE)],
+        "Throttle":[20.0 for i in range(WINDOW_SIZE)],
+        "nGear":[3.0 for i in range(WINDOW_SIZE)]
     })
 
 @pytest.fixture
-def sample_test_dataset():
+def sample_test_dataset(sample_window):
     """Returns a batch of raw windows of shape (10, 20, 4)."""
     rng = np.random.default_rng(0) #creates a generator
-    return rng.uniform(10, 100, size=(10, 20, 4)) #an nd array created with the size given, the values generated from low = 10, high = 100
+    return [sample_window for i in range(10)] #an nd array created with the size given, the values generated from low = 10, high = 100
 
 
 @pytest.fixture
@@ -146,7 +145,7 @@ class TestPrepareDatasets:
 
         # 2. Shape verification: Conv1D requires (Batch, Features/Channels, Window_Size)
         num_features = 5
-        window_size = 20
+        window_size = WINDOW_SIZE
         assert X_train_t.shape[1] == num_features
         assert X_train_t.shape[2] == window_size
 
@@ -198,3 +197,40 @@ class TestInjectFault:
         
         assert isinstance(modified, pd.DataFrame)
         assert modified.shape == sample_window.shape
+
+class TestGenerateEvaluationDataset:
+    def test_generate_evaluation_dataset_output_shapes(self, sample_test_dataset):
+        """Verify output tensor dimensions match PyTorch Conv1D expectation: (Batch, Features, Window_Size)."""
+        num_windows, window_size, n_features = (len(sample_test_dataset),len(sample_test_dataset[0]),len(sample_test_dataset[0].loc[0]))
+        
+        # Fit dummy scaler
+        scaler = StandardScaler()
+        totalDF = pd.DataFrame()
+        for df in sample_test_dataset:
+            totalDF = pd.concat([totalDF, df])
+        scaler.fit(totalDF)
+        #Here the 3D array gets turned into 2D array because of the tuple of length 2
+        #The -1 means inference so it infers that length of array must firstDim * secondDim both of sample_test_dataset
+        X_tensor, y_test, fault_tags = generate_evaluation_dataset(
+            sample_test_dataset, scaler, anomaly_ratio=0.5, seed=42
+        )
+
+        assert isinstance(X_tensor, torch.Tensor)
+        assert X_tensor.shape == (num_windows, n_features, window_size)
+        assert y_test.shape == (num_windows,)
+        assert len(fault_tags) == num_windows
+
+
+    def test_generate_evaluation_dataset_reproducibility(self, sample_test_dataset):
+        """Verify that passing the same seed yields deterministic outputs."""
+        scaler = StandardScaler()
+        totalDF = pd.DataFrame()
+        for df in sample_test_dataset:
+            totalDF = pd.concat([totalDF, df])
+            scaler.fit(totalDF)
+        X1, y1, tags1 = generate_evaluation_dataset(sample_test_dataset, scaler, seed=123)
+        X2, y2, tags2 = generate_evaluation_dataset(sample_test_dataset, scaler, seed=123)
+
+        torch.testing.assert_close(X1, X2)
+        np.testing.assert_array_equal(y1, y2)
+        assert tags1 == tags2

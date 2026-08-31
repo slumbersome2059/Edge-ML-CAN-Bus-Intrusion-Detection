@@ -54,9 +54,8 @@ def prepare_datasets(csv_path: str):
     def extract_windows(dframe):
         windows = []
         for _, group in dframe.groupby("segment_id"):
-            data = group[[*FEATURE_COLUMNS]].to_numpy()#returns numpy array with each row as list in the array
-            for start in range(0, len(data) - WINDOW_SIZE + 1, STRIDE):
-                windows.append(data[start : start + WINDOW_SIZE])#windows is a 3d array
+            for start in range(0, len(group) - WINDOW_SIZE + 1, STRIDE):
+                windows.append(group[[*FEATURE_COLUMNS]].iloc[start : start + WINDOW_SIZE])#windows is a 3d array
         return np.array(windows, dtype=np.float32)
 
     X_train = extract_windows(train_df)
@@ -65,8 +64,8 @@ def prepare_datasets(csv_path: str):
 
     # Currently the shape is (1, Window_Size, Channels/Features)
     # Convert to PyTorch Conv1D shape: (Batch, Channels/Features, Window_Size)
-    X_train_t = torch.tensor(X_train).transpose(1, 2)
-    X_val_t = torch.tensor(X_val).transpose(1, 2)
+    X_train_t = torch.tensor(np.array(X_train)).transpose(1, 2)
+    X_val_t = torch.tensor(np.array(X_val)).transpose(1, 2)
     
     # A Dataset is a way to store samples and if you need to you can store labels associated with tensors 
     # so "pos" might be associated with "good review"
@@ -166,7 +165,7 @@ def generate_evaluation_dataset(
             label = 0
 
         # Scale features using fitted scaler parameters
-        scaled_window = scaler.transform(modified_window)
+        scaled_window = scaler.transform(np.array(modified_window))
         processed_windows.append(scaled_window)
         labels.append(label)
         fault_tags.append(fault_str)
